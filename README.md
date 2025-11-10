@@ -14,28 +14,32 @@ A TypeScript implementation of robust Gauss–Krüger (Transverse Mercator) forw
 ## Installation
 
 ```bash
-npm install gauss-kruger
+npm install @canetoad/grauss-kruger
 # or
-yarn add gauss-kruger
+yarn add @canetoad/grauss-kruger
 # or
-pnpm add gauss-kruger
+pnpm add @canetoad/grauss-kruger
 ```
 
 ## Quick Start
 
 ```typescript
-import { GaussKrugerProjection } from 'gauss-kruger';
+import { GaussKrugerProjection } from "@canetoad/grauss-kruger";
 
 // Create projection with WGS84/UTM-like defaults (Zone 33 style)
 const proj = new GaussKrugerProjection();
 
 // Forward projection: geographic → grid
 const { northing, easting } = proj.geodeticToGrid(-33.86, 151.21);
-console.log(`Easting: ${easting.toFixed(2)}m, Northing: ${northing.toFixed(2)}m`);
+console.log(
+  `Easting: ${easting.toFixed(2)}m, Northing: ${northing.toFixed(2)}m`,
+);
 
-// Inverse projection: grid → geographic  
+// Inverse projection: grid → geographic
 const { latitude, longitude } = proj.gridToGeodetic(northing, easting);
-console.log(`Latitude: ${latitude.toFixed(6)}°, Longitude: ${longitude.toFixed(6)}°`);
+console.log(
+  `Latitude: ${latitude.toFixed(6)}°, Longitude: ${longitude.toFixed(6)}°`,
+);
 ```
 
 ## MGA2020 (Australian Map Grid 2020)
@@ -43,15 +47,18 @@ console.log(`Latitude: ${latitude.toFixed(6)}°, Longitude: ${longitude.toFixed(
 Built-in support for Australian MGA2020 zones:
 
 ```typescript
-import { 
-  projectMGA2020, 
-  inverseMGA2020, 
-  mga2020ZoneFromLongitude 
-} from 'gauss-kruger';
+import {
+  projectMGA2020,
+  inverseMGA2020,
+  mga2020ZoneFromLongitude,
+} from "gauss-kruger";
 
 // Project Sydney coordinates to MGA2020
 const sydney = { latitude: -33.8688, longitude: 151.2093 };
-const { zone, easting, northing } = projectMGA2020(sydney.latitude, sydney.longitude);
+const { zone, easting, northing } = projectMGA2020(
+  sydney.latitude,
+  sydney.longitude,
+);
 console.log(`MGA2020 Zone ${zone}: E=${easting}m, N=${northing}m`);
 
 // Inverse projection
@@ -72,6 +79,7 @@ new GaussKrugerProjection(options?: GaussKrugerProjectionOptions)
 ```
 
 **Options:**
+
 - `equatorialRadius?: number` - Semi-major axis in meters (default: 6378137.0)
 - `flattening?: number` - Ellipsoid flattening (default: 1/298.257223563)
 - `centralMeridian?: number` - Central meridian in degrees (default: 15)
@@ -98,13 +106,13 @@ new GaussKrugerProjection(options?: GaussKrugerProjectionOptions)
 ### Custom Projection (UTM Zone 10)
 
 ```typescript
-import { GaussKrugerProjection } from 'gauss-kruger';
+import { GaussKrugerProjection } from "@canetoad/grauss-kruger";
 
 const utm10 = new GaussKrugerProjection({
-  centralMeridian: -123,  // UTM Zone 10 central meridian
+  centralMeridian: -123, // UTM Zone 10 central meridian
   scale: 0.9996,
   falseEasting: 500000,
-  falseNorthing: 0
+  falseNorthing: 0,
 });
 
 const point = utm10.geodeticToGrid(37.7749, -122.4194); // San Francisco
@@ -114,7 +122,7 @@ console.log(point);
 ### British National Grid (OSGB36)
 
 ```typescript
-import { GaussKrugerProjection } from 'gauss-kruger';
+import { GaussKrugerProjection } from "@canetoad/grauss-kruger";
 
 const osgb36 = new GaussKrugerProjection({
   equatorialRadius: 6377563.396,
@@ -123,7 +131,7 @@ const osgb36 = new GaussKrugerProjection({
   latitudeOfOrigin: 49,
   scale: 0.9996012717,
   falseEasting: 400000,
-  falseNorthing: -100000
+  falseNorthing: -100000,
 });
 
 const london = osgb36.geodeticToGrid(51.5074, -0.1278);
@@ -155,15 +163,15 @@ console.log(london);
 Full TypeScript definitions included:
 
 ```typescript
-import { 
-  GaussKrugerProjection, 
+import {
+  GaussKrugerProjection,
   GaussKrugerProjectionOptions,
-  MGA2020Zone 
-} from 'gauss-kruger';
+  MGA2020Zone,
+} from "gauss-kruger";
 
 const options: GaussKrugerProjectionOptions = {
   centralMeridian: 135,
-  scale: 0.9996
+  scale: 0.9996,
 };
 
 const proj = new GaussKrugerProjection(options);
