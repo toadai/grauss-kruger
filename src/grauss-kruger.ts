@@ -4,8 +4,10 @@
 // - All input/output angles are DEGREES.
 // - All linear units are METERS.
 // References:
-// * IOGP / EPSG Guidance Note 7-2, “Transverse Mercator (JHS formulas)” (2019). 9807 method.  (alpha/beta series, B, flow)
-// * Lantmäteriet, “Gauss Conformal Projection (Transverse Mercator) — Krüger’s formulas” (2008). (coefficients & steps)
+// * IOGP / EPSG Guidance Note 7-2, method 9807 (JHS formulas):
+//   https://epsg.org/guidance-notes.html
+// * Karney, “Transverse Mercator with an accuracy of a few nanometers” (2011):
+//   https://doi.org/10.1007/s00190-011-0445-3
 //
 // Defaults match WGS 84 / UTM-style parameters for a Zone 33N-like setup:
 //   a = 6378137.0 m, f = 1/298.257223563, λ0 = 15°, k0 = 0.9996, FE = 500000 m, FN = 0 m, φ0 = 0°.
@@ -54,13 +56,13 @@ const p4 = (x: number) => x * x * x * x;
 
 /**
  * Gauss–Krüger (Transverse Mercator) projection using the EPSG JHS formulation:
- * - “Conformal sphere” path for forward and reverse (Q, β, iterative Q″).
+ * - “Conformal sphere” path for forward and reverse, with stable tangent recovery.
  * - Krüger α- and β-series in third flattening n to 4th order.
  * - Rectifying constant B = a/(1+n)*(1 + n²/4 + n⁴/64).
  *
  * Notes on domain & stability:
  * - The JHS approach is robust to ~±40° longitude from λ₀; UTM usage is ±3°.
- * - Hyperbolic functions are clamped near |x|=1 to avoid NaN/Inf from rounding.
+ * - atanh arguments are clamped inside |x|=1 to avoid boundary overflow.
  */
 export class GaussKrugerProjection {
   readonly equatorialRadius: number; // a
@@ -124,6 +126,17 @@ export class GaussKrugerProjection {
   geodeticToGrid(latitude: number, longitude: number): ForwardResult {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
       throw new Error("latitude/longitude must be finite numbers");
+    }
+    if (latitude < -90 || latitude > 90) {
+      throw new Error("latitude must be in [-90, 90]");
+    }
+    if (Math.abs(latitude) === 90) {
+      return {
+        northing:
+          this.falseNorthing +
+          this.scale * (Math.sign(latitude) * this.B * (Math.PI / 2) - this.M0),
+        easting: this.falseEasting,
+      };
     }
 
     const φ = toRad(latitude);
@@ -213,17 +226,24 @@ export class GaussKrugerProjection {
       beta[2] * Math.cos(sixξ) * Math.sinh(sixη) -
       beta[3] * Math.cos(eightξ) * Math.sinh(eightη);
 
-    // Conformal latitude β′ and Δλ from (ξ′, η′)
+    // Recover tan(conformal latitude) without asin losing precision near the poles.
+    // Karney's relation avoids subtracting nearly equal values when |sin ξ′| ≈ 1.
     const sinξp = Math.sin(ξp);
     const cosξp = Math.cos(ξp);
-    const coshηp = cosh(ηp);
     const sinhηp = Math.sinh(ηp);
-
-    const βp = Math.asin(clampUnit(sinξp / coshηp));
+    if (sinhηp === 0 && Math.abs(cosξp) <= 4 * Number.EPSILON) {
+      // Allow a few ulps from origin/scale arithmetic at an exact pole.
+      // Longitude is undefined there; use the central meridian by convention.
+      return {
+        latitude: sinξp < 0 ? -90 : 90,
+        longitude: this.centralMeridian,
+      };
+    }
+    const tauPrime = sinξp / Math.hypot(sinhηp, cosξp);
     const Δλ = Math.atan2(sinhηp, cosξp);
 
-    // Recover geodetic φ from β′: Q′ = asinh(tan β′) ; iterate Q″ = Q′ + e atanh(e tanh Q″)
-    const Q1 = asinh(Math.tan(βp));
+    // Invert the conformal latitude using isometric latitude Q, not a rounded asin.
+    const Q1 = asinh(tauPrime);
     let Q2 = Q1;
     // Iterate to convergence; 3–4 iterations are typical (EPSG). Clamp inside atanh.
     for (let i = 0; i < 6; i++) {
@@ -244,7 +264,23 @@ export class GaussKrugerProjection {
 
   #validateInput(): void {
     const { equatorialRadius: a, flattening: f, scale: k0 } = this;
+    if (!Number.isFinite(a))
+      throw new Error("equatorialRadius must be a finite number");
+    if (!Number.isFinite(f))
+      throw new Error("flattening must be a finite number");
+    if (!Number.isFinite(this.centralMeridian))
+      throw new Error("centralMeridian must be a finite number");
+    if (!Number.isFinite(this.latitudeOfOrigin))
+      throw new Error("latitudeOfOrigin must be a finite number");
+    if (!Number.isFinite(k0))
+      throw new Error("scale must be a finite number");
+    if (!Number.isFinite(this.falseEasting))
+      throw new Error("falseEasting must be a finite number");
+    if (!Number.isFinite(this.falseNorthing))
+      throw new Error("falseNorthing must be a finite number");
     if (!(a > 0)) throw new Error("equatorialRadius must be > 0");
+    if (this.latitudeOfOrigin < -90 || this.latitudeOfOrigin > 90)
+      throw new Error("latitudeOfOrigin must be in [-90, 90]");
     // Typical Earth ellipsoids: 0 < f < ~0.01 (WGS84 ≈ 0.0033528)
     if (!(f > 0 && f < 0.01))
       throw new Error("flattening must be in (0, 0.01)");
@@ -261,7 +297,7 @@ export class GaussKrugerProjection {
 
     const Q0 = asinh(Math.tan(φ0)) - this.e * atanh(this.e * Math.sin(φ0));
     const β0 = Math.atan(sinh(Q0));
-    const ξ00 = Math.asin(Math.sin(β0)); // η0 = 0 when λ=λ0 ⇒ ξ0 = β0
+    const ξ00 = β0; // η0 = 0 when λ=λ0 ⇒ ξ0 = β0
 
     // ξ0 at origin includes α-series (η0=0 ⇒ cosh(2j*0)=1)
     const ξ0 =
@@ -274,11 +310,3 @@ export class GaussKrugerProjection {
     return this.B * ξ0;
   }
 }
-
-/* -------------------------------------------
- * Quick usage:
- *
- * const proj = new GaussKrugerProjection(); // WGS84 / UTM-like defaults (Zone 33 style)
- * const fwd = proj.geodeticToGrid(-33.86, 151.21);          // { northing, easting }
- * const inv = proj.gridToGeodetic(fwd.northing, fwd.easting); // round-trip
- * ------------------------------------------- */

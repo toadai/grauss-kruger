@@ -1,6 +1,8 @@
 node_modules
 dist
 dist-cjs
+.test-dist
+.example-dist
 *.log
 *.tgz
 .DS_Store

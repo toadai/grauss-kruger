@@ -1,0 +1,193 @@
+name: Release to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable vX.Y.Z tag; dispatch using this same tag as the workflow ref
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+    steps:
+      - name: Check out the dispatch commit and complete tag history
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify tag, version, source visibility, and default-branch ancestry
+        id: identity
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "toadai/grauss-kruger" ]] || { echo 'Unexpected source repository'; exit 1; }
+          [[ "$REPOSITORY_PRIVATE" == "false" ]] || { echo 'npm provenance requires a public source repository'; exit 1; }
+          # Dispatch on the tag itself so npm provenance identifies the built source,
+          # not an unrelated default-branch workflow commit.
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const tag = process.env.RELEASE_TAG;
+          if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(tag)) {
+            throw new Error('Release tag must be a stable vX.Y.Z version');
+          }
+          if (process.env.GITHUB_REF !== `refs/tags/${tag}`) {
+            throw new Error('Dispatch with --ref equal to the existing release tag');
+          }
+          if (pkg.name !== '@canetoad/grauss-kruger' || tag !== `v${pkg.version}`) {
+            throw new Error('Release tag must exactly match the package name/version');
+          }
+          NODE
+          git show-ref --verify "refs/tags/$RELEASE_TAG"
+          commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          [[ "$commit" == "$GITHUB_SHA" && "$commit" == "$(git rev-parse HEAD)" ]] || { echo 'Tag no longer matches dispatch commit'; exit 1; }
+          git merge-base --is-ancestor "$commit" "refs/remotes/origin/$DEFAULT_BRANCH" || { echo 'Release commit must belong to default-branch history'; exit 1; }
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: Release checks / Node ${{ matrix.node }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18/20 are EOL compatibility checks; 22/24/26 are maintained LTS lines.
+        node: [18, 20, 22, 24, 26]
+    steps:
+      - name: Check out the validated commit
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run example:mga2020
+      - run: npm run example:utm
+      - name: Test packed package
+        if: matrix.node != 24
+        run: npm run test:package
+      - name: Test and retain the exact release tarball
+        if: matrix.node == 24
+        env:
+          PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/npm-release
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run test:package
+          cd "$PACKAGE_OUTPUT_DIR"
+          tarball="canetoad-grauss-kruger-${RELEASE_TAG#v}.tgz"
+          test -f "$tarball"
+          sha256sum "$tarball" > SHA256SUMS
+      - name: Upload the verified release tarball
+        if: matrix.node == 24
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: npm-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/npm-release/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish verified tarball
+    needs: [validate, check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Configure required reviewers and protected release-tag rules for this
+    # environment. npm's trusted publisher must name release.yml and npm.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the validated commit for a final remote tag check
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+          persist-credentials: false
+      - name: Set up the publishing runtime
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Require OIDC-compatible Node.js and npm
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          const atLeast = (actual, minimum) => {
+            const a = actual.split('.').map(Number);
+            for (let i = 0; i < minimum.length; i++) {
+              if (a[i] !== minimum[i]) return a[i] > minimum[i];
+            }
+            return true;
+          };
+          const npm = execFileSync('npm', ['--version'], { encoding: 'utf8' }).trim();
+          if (!atLeast(process.versions.node, [22, 14, 0]) || !atLeast(npm, [11, 5, 1])) {
+            throw new Error('Publishing requires Node >=22.14.0 and npm >=11.5.1');
+          }
+          NODE
+      - name: Download the verified tarball from this run
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: npm-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/npm-release
+      - name: Verify artifact checksum, package identity, and unmoved tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+          PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/npm-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/tags/$RELEASE_TAG"
+          [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" == "$RELEASE_COMMIT" ]] || { echo 'Release tag moved after verification'; exit 1; }
+          cd "$PACKAGE_OUTPUT_DIR"
+          sha256sum --check SHA256SUMS
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { readdirSync } from 'node:fs';
+          const tarballs = readdirSync('.').filter(name => name.endsWith('.tgz'));
+          const expected = `canetoad-grauss-kruger-${process.env.RELEASE_TAG.slice(1)}.tgz`;
+          if (tarballs.length !== 1 || tarballs[0] !== expected) throw new Error('Unexpected release artifact');
+          const pkg = JSON.parse(execFileSync('tar', ['-xOf', expected, 'package/package.json'], { encoding: 'utf8' }));
+          if (pkg.name !== '@canetoad/grauss-kruger' || `v${pkg.version}` !== process.env.RELEASE_TAG) {
+            throw new Error('Packed package does not match the validated release');
+          }
+          NODE
+      - name: Publish with trusted OIDC authentication and provenance
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/npm-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No npm ci, rebuild, lifecycle hook, or long-lived NPM_TOKEN here:
+          # publish exactly the checksum-verified, tested tarball.
+          npm publish "$PACKAGE_OUTPUT_DIR/canetoad-grauss-kruger-${RELEASE_TAG#v}.tgz" \
+            --ignore-scripts --provenance --access public --registry=https://registry.npmjs.org

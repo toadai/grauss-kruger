@@ -1,6 +1,6 @@
 {
   "name": "@canetoad/grauss-kruger",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Typed Gauss–Krüger (Transverse Mercator) forward/inverse projection utilities w/ MGA2020",
   "publishConfig": {
     "access": "public"
@@ -25,44 +25,52 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist-cjs/index.js"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist-cjs/index.d.ts",
+        "default": "./dist-cjs/index.js"
+      }
     }
   },
   "files": [
     "dist",
     "dist-cjs",
+    "src",
     "README.md",
     "LICENSE"
   ],
   "sideEffects": false,
   "repository": {
     "type": "git",
-    "url": "https://github.com/canetoad/graussKruger.git"
+    "url": "https://github.com/toadai/grauss-kruger.git"
   },
   "bugs": {
-    "url": "https://github.com/canetoad/graussKruger/issues"
+    "url": "https://github.com/toadai/grauss-kruger/issues"
   },
-  "homepage": "https://github.com/canetoad/graussKruger#readme",
+  "homepage": "https://github.com/toadai/grauss-kruger#readme",
   "scripts": {
     "build": "npm run clean && npm run build:esm && npm run build:cjs && node scripts/create-cjs-package.mjs",
     "build:esm": "tsc -p tsconfig.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
-    "clean": "rimraf dist dist-cjs",
+    "clean": "node scripts/clean.mjs",
     "dev": "tsc -p tsconfig.json --watch",
     "test": "npm run build && npm run compile:test && npm run test:smoke",
-    "compile:test": "mkdir -p dist/test && npx tsc test/gauss-kruger.test.ts --outDir dist --target ES2020 --module NodeNext --moduleResolution NodeNext --esModuleInterop true",
-    "test:smoke": "node --test dist/gauss-kruger.test.js",
-    "test:watch": "npm run build && npm run compile:test && node --test --watch dist/gauss-kruger.test.js",
-    "lint": "tsc --noEmit -p tsconfig.json",
+    "compile:test": "tsc -p tsconfig.test.json",
+    "test:smoke": "node --test .test-dist/gauss-kruger.test.js",
+    "test:watch": "npm run build && npm run compile:test && node --test --watch .test-dist/gauss-kruger.test.js",
+    "test:package": "npm run build && node scripts/test-package.mjs",
+    "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.examples.json",
     "format": "prettier --write .",
-    "example:mga2020": "ts-node --esm examples/mag2020.ts",
-    "example:utm": "ts-node --esm examples/utm.ts",
+    "compile:examples": "tsc -p tsconfig.examples.json",
+    "example:mga2020": "npm run build && npm run compile:examples && node .example-dist/mag2020.js",
+    "example:utm": "npm run build && npm run compile:examples && node .example-dist/utm.js",
+    "prepack": "npm run build",
     "prepublishOnly": "npm run test && npm run lint",
     "preversion": "npm run test && npm run lint",
-    "version": "npm run build",
-    "postversion": "git push && git push --tags"
+    "version": "npm run build"
   },
   "engines": {
     "node": ">=18"
@@ -70,8 +78,6 @@
   "devDependencies": {
     "@types/node": "^22.9.0",
     "prettier": "^3.3.3",
-    "rimraf": "^6.0.0",
-    "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
   }
 }

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Node ${{ matrix.node }} (${{ matrix.status }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # EOL runtimes are compatibility checks, not a security-support promise.
+          - node: 18
+            status: legacy compatibility
+          - node: 20
+            status: legacy compatibility
+          - node: 22
+            status: maintenance LTS
+          - node: 24
+            status: maintenance LTS
+          - node: 26
+            status: active LTS
+    steps:
+      - name: Check out source
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - run: npm ci
+      # npm test builds; do not add a redundant standalone build here.
+      - run: npm test
+      - run: npm run lint
+      - run: npm run test:package
+      - run: npm run example:mga2020
+      - run: npm run example:utm

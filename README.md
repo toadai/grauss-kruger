@@ -1,130 +1,115 @@
-# Gauss-Krüger (Transverse Mercator) Projection
+# Gauss–Krüger (Transverse Mercator)
 
-A TypeScript implementation of robust Gauss–Krüger (Transverse Mercator) forward/inverse projection utilities using the EPSG JHS formulation.
+A TypeScript implementation of the EPSG Transverse Mercator method (9807), using fourth-order Krüger series and JavaScript double-precision arithmetic. Includes mainland Australian MGA2020 helpers, TypeScript declarations, and ESM/CommonJS entry points. No runtime dependencies. Node.js 18 or later is required.
 
-## Features
+## Quick start
 
-- **Typed TypeScript** - Full TypeScript support with comprehensive type definitions
-- **EPSG JHS Formulation** - Uses the robust IOGP/EPSG Guidance Note 7-2 method
-- **MGA2020 Support** - Built-in support for Australian Map Grid 2020 zones
-- **High Precision** - Stable to ~±40° longitude from central meridian
-- **Zero Dependencies** - Pure TypeScript implementation with no external dependencies
-- **ESM/CJS Dual** - Supports both ES modules and CommonJS
-
-## Installation
-
-```bash
+```sh
 npm install @canetoad/grauss-kruger
-# or
-yarn add @canetoad/grauss-kruger
-# or
-pnpm add @canetoad/grauss-kruger
 ```
-
-## Quick Start
 
 ```typescript
-import { GaussKrugerProjection } from "@canetoad/grauss-kruger";
+import { createMGA2020 } from "@canetoad/grauss-kruger";
 
-// Create projection with WGS84/UTM-like defaults (Zone 33 style)
-const proj = new GaussKrugerProjection();
+const projection = createMGA2020(56);
+// Illustrative Sydney coordinate: interpret these angles as GDA2020.
+const grid = projection.geodeticToGrid(-33.8688, 151.2093);
+console.log(grid.easting, grid.northing); // metres
 
-// Forward projection: geographic → grid
-const { northing, easting } = proj.geodeticToGrid(-33.86, 151.21);
-console.log(
-  `Easting: ${easting.toFixed(2)}m, Northing: ${northing.toFixed(2)}m`,
-);
-
-// Inverse projection: grid → geographic
-const { latitude, longitude } = proj.gridToGeodetic(northing, easting);
-console.log(
-  `Latitude: ${latitude.toFixed(6)}°, Longitude: ${longitude.toFixed(6)}°`,
-);
+// Class inverse takes NORTHING first.
+const geographic = projection.gridToGeodetic(grid.northing, grid.easting);
+console.log(geographic.latitude, geographic.longitude); // decimal degrees
 ```
 
-## MGA2020 (Australian Map Grid 2020)
+CommonJS consumers can use `const { createMGA2020 } = require("@canetoad/grauss-kruger");`.
 
-Built-in support for Australian MGA2020 zones:
+**Projection is not datum transformation.** Geographic input must already use the datum associated with your projection: GDA2020 for MGA2020, WGS84 for a WGS84 configuration, or OSGB36 for a British National Grid configuration. Supplying GPS/WGS84 angles to an MGA2020 or OSGB36 projection does not transform their datum or coordinate epoch.
+
+## Choose an MGA2020 zone
 
 ```typescript
 import {
   projectMGA2020,
   inverseMGA2020,
-  mga2020ZoneFromLongitude,
-} from "gauss-kruger";
+} from "@canetoad/grauss-kruger";
 
-// Project Sydney coordinates to MGA2020
-const sydney = { latitude: -33.8688, longitude: 151.2093 };
-const { zone, easting, northing } = projectMGA2020(
-  sydney.latitude,
-  sydney.longitude,
-);
-console.log(`MGA2020 Zone ${zone}: E=${easting}m, N=${northing}m`);
-
-// Inverse projection
-const back = inverseMGA2020(zone, easting, northing);
-console.log(`Back to: ${back.latitude}°, ${back.longitude}°`);
+const grid = projectMGA2020(-33.8688, 151.2093);
+// Wrapper inverse takes EASTING first, unlike the class method.
+const geographic = inverseMGA2020(grid.zone, grid.easting, grid.northing);
 ```
 
-## API Reference
+Automatic zone selection uses `floor((longitude + 180) / 6) + 1`, then deliberately clamps to mainland zones **49–56**. This is not a worldwide UTM zone selector or a check that a point lies in Australia. For finite longitudes outside that range it returns an endpoint zone; do not use that result as evidence the projection is suitable. Select a fixed zone with `createMGA2020(zone)` when your dataset specifies one. MGA2020 helpers use GRS80, scale 0.9996, false easting 500,000 m and southern-hemisphere false northing 10,000,000 m.
 
-### GaussKrugerProjection
+## API reference
 
-Main class for Gauss-Krüger projections.
+All angles are decimal degrees; all grid coordinates and radii are metres. Scale and flattening are dimensionless. Returned objects use named properties; do not infer argument order from property order.
 
-#### Constructor
+### `GaussKrugerProjection`
 
 ```typescript
-new GaussKrugerProjection(options?: GaussKrugerProjectionOptions)
+import {
+  GaussKrugerProjection,
+  type GaussKrugerProjectionOptions,
+  type MGA2020Zone,
+} from "@canetoad/grauss-kruger";
+
+const options: GaussKrugerProjectionOptions = { centralMeridian: -123 };
+const projection = new GaussKrugerProjection(options);
+const zone: MGA2020Zone = 56;
 ```
 
-**Options:**
+| Constructor option | Default | Meaning |
+| --- | --- | --- |
+| `equatorialRadius` | `6378137` | Ellipsoid semi-major axis, metres |
+| `flattening` | `1 / 298.257223563` | WGS84 flattening |
+| `centralMeridian` | `15` | Central meridian, degrees |
+| `latitudeOfOrigin` | `0` | Latitude of origin, degrees |
+| `scale` | `0.9996` | Central-meridian scale factor |
+| `falseEasting` | `500000` | Easting offset, metres |
+| `falseNorthing` | `0` | Northing offset, metres |
 
-- `equatorialRadius?: number` - Semi-major axis in meters (default: 6378137.0)
-- `flattening?: number` - Ellipsoid flattening (default: 1/298.257223563)
-- `centralMeridian?: number` - Central meridian in degrees (default: 15)
-- `latitudeOfOrigin?: number` - Latitude of origin in degrees (default: 0)
-- `scale?: number` - Scale factor at central meridian (default: 0.9996)
-- `falseEasting?: number` - False easting in meters (default: 500000)
-- `falseNorthing?: number` - False northing in meters (default: 0)
+The defaults are WGS84 / UTM zone 33N-like parameters, **not** a global projection. Configure the appropriate zone and hemisphere for your data.
 
-#### Methods
+| Method | Result |
+| --- | --- |
+| `geodeticToGrid(latitude, longitude)` | `{ northing, easting }` |
+| `gridToGeodetic(northing, easting)` | `{ latitude, longitude }` |
 
-- `geodeticToGrid(latitude: number, longitude: number): { northing: number, easting: number }`
-- `gridToGeodetic(northing: number, easting: number): { latitude: number, longitude: number }`
+### Validation and longitude representation
 
-### MGA2020 Functions
+All constructor options and coordinate inputs must be finite. Latitude and latitude of origin must be in **[−90°, 90°]**. Radius must be positive, flattening must be in `(0, 0.01)`, and scale must be in `(0, 2)`. MGA zone arguments must be integers from 49 through 56; invalid values are rejected at runtime as well as restricted by the exported zone type.
 
-- `mga2020ZoneFromLongitude(longitude: number): MGA2020Zone` - Get zone from longitude
-- `mga2020CentralMeridian(zone: number): number` - Get central meridian for zone
-- `createMGA2020(zone: MGA2020Zone): GaussKrugerProjection` - Create MGA2020 projection
-- `projectMGA2020(latitude: number, longitude: number): { zone: MGA2020Zone, easting: number, northing: number }`
-- `inverseMGA2020(zone: MGA2020Zone, easting: number, northing: number): { latitude: number, longitude: number }`
+Finite longitude inputs may use wrapped representations (for example, 151° and −209°). Automatic MGA zone selection deliberately uses the supplied longitude without wrap normalization, so equivalent wrapped longitudes can select different clamped zones. Inverse longitude is represented relative to the configured central meridian (central meridian plus an `atan2` offset of up to ±180°), not necessarily in the global interval [−180°, 180°]. At an exact pole it uses the central meridian as a convention.
 
-## Examples
+### MGA2020 helpers
 
-### Custom Projection (UTM Zone 10)
+| Function | Result |
+| --- | --- |
+| `mga2020ZoneFromLongitude(longitude)` | Zone clamped to 49–56 |
+| `mga2020CentralMeridian(zone)` | `6 * zone - 183`, degrees |
+| `createMGA2020(zone)` | Configured `GaussKrugerProjection` |
+| `projectMGA2020(latitude, longitude)` | `{ zone, easting, northing }` |
+| `inverseMGA2020(zone, easting, northing)` | `{ latitude, longitude }` |
 
-```typescript
-import { GaussKrugerProjection } from "@canetoad/grauss-kruger";
+`MGA2020Zone` is the union `49 | 50 | 51 | 52 | 53 | 54 | 55 | 56`.
 
-const utm10 = new GaussKrugerProjection({
-  centralMeridian: -123, // UTM Zone 10 central meridian
-  scale: 0.9996,
-  falseEasting: 500000,
-  falseNorthing: 0,
-});
+## Configure another grid
 
-const point = utm10.geodeticToGrid(37.7749, -122.4194); // San Francisco
-console.log(point);
-```
-
-### British National Grid (OSGB36)
+For WGS84 / UTM zone 10N, supply WGS84 geographic coordinates:
 
 ```typescript
 import { GaussKrugerProjection } from "@canetoad/grauss-kruger";
 
-const osgb36 = new GaussKrugerProjection({
+const utm10 = new GaussKrugerProjection({ centralMeridian: -123 });
+const grid = utm10.geodeticToGrid(37.7749, -122.4194);
+```
+
+For British National Grid, configure Airy 1830 and **supply OSGB36 geographic coordinates**, not untransformed WGS84 coordinates:
+
+```typescript
+import { GaussKrugerProjection } from "@canetoad/grauss-kruger";
+
+const nationalGrid = new GaussKrugerProjection({
   equatorialRadius: 6377563.396,
   flattening: 1 / 299.3249646,
   centralMeridian: -2,
@@ -133,73 +118,29 @@ const osgb36 = new GaussKrugerProjection({
   falseEasting: 400000,
   falseNorthing: -100000,
 });
-
-const london = osgb36.geodeticToGrid(51.5074, -0.1278);
-console.log(london);
+const origin = nationalGrid.geodeticToGrid(49, -2);
 ```
 
-## Coordinate Systems
+## Accuracy and limits
 
-### Input/Output Units
+This is a **fourth-order** series implementation, not an exact Transverse Mercator solver. JavaScript numbers use IEEE 754 double precision; series truncation, floating-point error, distance from the central meridian, and datum/epoch uncertainty are separate error sources. Ordinary UTM zones extend about ±3° from their central meridian. Prefer the intended grid zone rather than extrapolating far beyond it.
 
-- **Angles**: Degrees (decimal)
-- **Linear**: Meters
+An audit comparison against PROJ 9.8.1 sampled 3,649 forward points over latitudes −88° to 88° and central-meridian offsets −40° to 40°. The largest observed forward difference was approximately **0.0000203 m**. A separate 231-point inverse sample had a largest observed angular difference of **4.69 × 10⁻¹³ degrees**. These are observations for those samples, **not global error bounds**, guarantees for arbitrary ellipsoids or grid coordinates, or a substitute for independent validation of your application.
 
-### Supported Ellipsoids
+Forward/inverse round trips are approximate. Longitude is not uniquely defined at the poles, and no exact round-trip or global/polar accuracy guarantee is made. Validate results against authoritative control points for surveying or other accuracy-sensitive work.
 
-- WGS84 (default)
-- GRS80 (used in MGA2020)
-- Custom ellipsoids via constructor parameters
+## Development and security
 
-## Accuracy
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks and release instructions, [SECURITY.md](SECURITY.md) for private vulnerability reporting, and [CHANGELOG.md](CHANGELOG.md) for unreleased changes.
 
-- **Longitude range**: Stable to ~±40° from central meridian
-- **UTM usage**: Designed for ±3° (standard UTM range)
-- **Precision**: Sub-millimeter precision for typical use cases
-- **Round-trip**: Forward → inverse returns original coordinates within numerical precision
-
-## TypeScript Support
-
-Full TypeScript definitions included:
-
-```typescript
-import {
-  GaussKrugerProjection,
-  GaussKrugerProjectionOptions,
-  MGA2020Zone,
-} from "gauss-kruger";
-
-const options: GaussKrugerProjectionOptions = {
-  centralMeridian: 135,
-  scale: 0.9996,
-};
-
-const proj = new GaussKrugerProjection(options);
-const zone: MGA2020Zone = 56; // Type-safe zone numbers
-```
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Run tests
-npm test
-
-# Lint
-npm run lint
-```
+Source and issue tracker: [toadai/grauss-kruger](https://github.com/toadai/grauss-kruger).
 
 ## References
 
-- IOGP/EPSG Guidance Note 7-2, "Transverse Mercator (JHS formulas)" (2019)
-- Lantmäteriet, "Gauss Conformal Projection (Transverse Mercator) — Krüger's formulas" (2008)
-- Geoscience Australia, "GDA2020 / MGA2020" technical documentation
+- [EPSG method 9807: Transverse Mercator](https://epsg.org/coord-operation-method_9807/Transverse-Mercator.html), with formulas in IOGP/EPSG Guidance Note 7-2.
+- [Karney, *Transverse Mercator with an accuracy of a few nanometers* (2011)](https://doi.org/10.1007/s00190-011-0445-3). Explains series accuracy and exact approaches; its higher-order accuracy claims do not describe this fourth-order implementation.
+- [Geoscience Australia: GDA2020](https://www.ga.gov.au/scientific-topics/positioning-navigation/geodesy/datums-projections/gda2020) for the Australian datum and technical guidance.
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT; see [LICENSE](LICENSE).
