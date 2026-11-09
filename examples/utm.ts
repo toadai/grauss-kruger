@@ -5,7 +5,7 @@
  * using the GaussKrugerProjection class with standard UTM parameters.
  */
 
-import { GaussKrugerProjection, type GaussKrugerProjectionOptions } from '../src';
+import { GaussKrugerProjection, type GaussKrugerProjectionOptions } from '../dist/index.js';
 
 // Standard UTM parameters
 const UTM_DEFAULTS: GaussKrugerProjectionOptions = {
@@ -67,7 +67,7 @@ locations.forEach(location => {
 // Demonstrate UTM zone calculation
 console.log('=== UTM Zone Calculation ===');
 function getUTMZone(longitude: number): number {
-  return Math.floor((longitude + 180) / 6) + 1;
+  return Math.min(60, Math.max(1, Math.floor((longitude + 180) / 6) + 1));
 }
 
 const testLongitudes = [-180, -120, -60, 0, 60, 120, 180];
@@ -95,7 +95,7 @@ console.log(`  Point (40°, -75°): E=${customPoint.easting.toFixed(2)}m, N=${cu
 
 // Performance test
 console.log('\n=== Performance Test ===');
-const testProj = createUTM(33);
+const testProj = createUTM(53);
 const iterations = 10000;
 const startTime = performance.now();
 

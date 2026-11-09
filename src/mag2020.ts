@@ -10,20 +10,29 @@ const GRS80 = {
 };
 
 /**
- * Compute UTM/MGA central meridian (degrees) for a given integer zone.
+ * Compute the central meridian (degrees) for an MGA2020 integer zone in [49..56].
  * UTM rule: λ₀ = 6·zone − 183.
  * (e.g., z=49→111°, 50→117°, …, 56→153°)
  */
-export const mga2020CentralMeridian = (zone: number): number => zone * 6 - 183;
+export const mga2020CentralMeridian = (zone: number): number => {
+  if (!Number.isInteger(zone) || zone < 49 || zone > 56) {
+    throw new Error("MGA2020 zone must be an integer in [49, 56]");
+  }
+  return zone * 6 - 183;
+};
 
 /**
  * Determine the MGA2020 zone for a longitude (degrees).
  * Returns a value in [49..56] clamped to the Australian zones.
  *
  * GA defines MGA2020 as UTM over GDA2020 with the usual 6° zone width,
- * scale 0.9996, FE=500000 m, and FN=10,000,000 m in the southern hemisphere. :contentReference[oaicite:1]{index=1}
+ * scale 0.9996, FE=500000 m, and FN=10,000,000 m in the southern hemisphere:
+ * https://www.ga.gov.au/scientific-topics/positioning-navigation/geodesy/datums-projections
  */
 export function mga2020ZoneFromLongitude(longitudeDeg: number): MGA2020Zone {
+  if (!Number.isFinite(longitudeDeg)) {
+    throw new Error("longitude must be a finite number");
+  }
   const utmZone = Math.floor((longitudeDeg + 180) / 6) + 1; // standard UTM zoning
   const z = Math.min(56, Math.max(49, utmZone)); // clamp to AU zones
   return z as MGA2020Zone;
@@ -38,7 +47,8 @@ export function mga2020ZoneFromLongitude(longitudeDeg: number): MGA2020Zone {
  *  - Central meridian: 6·zone − 183 (deg)
  *  - k0: 0.9996
  *  - False Easting: 500000 m
- *  - False Northing: 10000000 m (southern hemisphere)  :contentReference[oaicite:2]{index=2}
+ *  - False Northing: 10000000 m (southern hemisphere)
+ * See GDA2020 / MGA zone 56 (EPSG:7856): https://epsg.io/7856
  */
 export function createMGA2020(zone: MGA2020Zone): GaussKrugerProjection {
   const f = 1 / GRS80.invF;
@@ -56,8 +66,7 @@ export function createMGA2020(zone: MGA2020Zone): GaussKrugerProjection {
  * Convenience: project a geographic coordinate in Australia with the correct MGA2020 zone.
  * Returns (zone, easting, northing).
  *
- * For multi‑zone workflows, Geoscience Australia recommends Krüger n‑series equations,
- * which your implementation uses. :contentReference[oaicite:3]{index=3}
+ * Uses the same fourth-order Krüger series as GaussKrugerProjection.
  */
 export function projectMGA2020(
   latitudeDeg: number,

@@ -11,7 +11,7 @@ import {
   mga2020ZoneFromLongitude,
   createMGA2020,
   type MGA2020Zone
-} from '../src';
+} from '../dist/index.js';
 
 // Major Australian cities coordinates
 const cities = [
